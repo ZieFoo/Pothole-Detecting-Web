@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pothole Detection</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <style>
+        body{
+            background: #111;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        h1{
+            margin-bottom: 25px;
+            color: #00ff88;
+            text-shadow: 0 0 10px #00ff88;
+        }
+        video{
+            width: 90%;
+            max-width: 600px;
+            border: 3px solid #00ff88;
+            border-radius: 12px;
+            margin-top: 20px;
+            box-shadow: 0 0 15px #00ff88;
+        }
+        button{
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            cursor: pointer;
+            background: #00ff88;
+            color: #111;
+            font-weight: bold;
+            transition: 0.2s ease;
+            margin-top: 15px;
+        }
+        button:hover{ background: #00ff88; }
+        button:active{ transform: scale(0.95); }
+        #controls { margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Pothole Detection</h1>
+    
+    <div id="controls">
+        <button id="start-btn">Start Live Detection</button>
+        <button id="video-btn" style="display:none;">Go to Live Video</button>
+        <button id="view-now" style="margin-left:8px;">Open Detection Page</button>
+    </div>
+
+    <video id="localVideo" autoplay playsinline></video>
+
+    <script>
+    const startBtn = document.getElementById("start-btn");
+    const videoBtn = document.getElementById("video-btn");
+    const viewNowBtn = document.getElementById("view-now");
+    const video = document.getElementById("localVideo");
+
+    let ws = null;
+    const SEND_WIDTH = 360;
+    const SEND_JPEG_QUALITY = 0.5;
+
+    viewNowBtn.onclick = () => {
+        window.open("/video", "_blank");
+    };
+
+    async function getBackCameraStream() {
+                try {
+            const s = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { exact: "environment" } }
+            });
+            return s;
+        } catch (err) {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoInputs = devices.filter(d => d.kind === 'videoinput');
+                let chosen = videoInputs.find(d => /back|rear|environment|wide/i.test(d.label));
+                if (!chosen && videoInputs.length) chosen = videoInputs[videoInputs.length -1];
+                if (chosen){
+                    const s = await navigator.mediaDevices.getUserMedia({ video: {deviceId : { exact: chosen.deviceId } } });
+                    return s;
+                }
+            } catch (e) {
+            }
+            return await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+    }
+
+    startBtn.onclick = async () => {
+        startBtn.disabled = true;
+        startBtn.innerText = "Starting..."
+
+        let stream;
+        try {
+            stream = await getBackCameraStream();
+        } catch (err) {
+            alert("Unable to access camera: " + err.message);
+            startBtn.disabled = false;
+            startBtn.innerText = "Start Live Detection";
+            return;
+        }
+
+        video.srcObject = stream;
+
+        await new Promise(resolve => {
+            video.onloadedmetadata = () => {
+                video.play();
+                resolve();
+            };
+        });
+
+        const lan_host = window.location.hostname;
+        //ws = new WebSocket(`ws://${lan_host}:5000/ws`);
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
+
+        ws.onopen = () => {
+            console.log("Websocket connected.");
+            startBtn.style.display= "none";
+            videoBtn.style.display = "inline-block";
+        };
+
+        ws.onclose = () => {
+            console.log("Websocket closed.")
+        };
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const sendIntervalMs = 100;
+        setInterval(() => {
+            if (!video.videoWidth || !video.videoHeight) return;
+
+            const ar = video.videoWidth / video.videoHeight;
+            const w = SEND_WIDTH;
+            const h = Math.round(SEND_WIDTH / ar);
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(video, 0, 0, w, h);
+            canvas.toBlob(blob => {
+                if (ws && ws.readyState == WebSocket.OPEN) {
+                    blob.arrayBuffer().then(buf => ws.send(buf));
+                }
+            }, "image/jpeg", SEND_JPEG_QUALITY);
+        }, sendIntervalMs);
+    };
+
+    videoBtn.onclick = () => {
+        window.location.href = "/video";
+    };
+    </script>
+</body>
+</html>
