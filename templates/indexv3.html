@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pothole Detection</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <style>
+        body{
+            background: #111;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 16px;
+        }
+        h1{
+            margin-bottom: 18px;
+            color: #00ff88;
+            text-shadow: 0 0 10px #00ff88;
+        }
+        .media-row {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .media {
+            width: 90%;
+            max-width: 360px;
+            border: 3px solid #00ff88;
+            border-radius: 12px;
+            box-shadow: 0 0 15px #00ff88;
+            overflow: hidden;
+            background: #000;
+        }
+        video, img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        #controls { margin-top: 12px; }
+        button{
+            padding: 10px 18px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #00ff88;
+            color: #111;
+            font-weight: bold;
+            transition: 0.15s ease;
+            margin: 6px;
+        }
+        button:active { transform: scale(0.98); }
+        small { display:block; margin-top:8px; color:#9f9; }
+    </style>
+</head>
+<body>
+    <h1>Pothole Detection - Live </h1>
+    
+    <div id="controls">
+        <button id="start-btn">Start Live Detection</button>
+        <button id="stop-btn" style="display:none;">Stop</button>
+        <button id="viewer-btn" onclick="window.open('/viewer', '_blank')">Open Viewer Page</button>
+        <small>Left: Raw camera preview — Right: Annotated (Server detection via WebRTC)</small>
+    </div>
+
+    <div class="media-row">
+        <div class="media">
+            <video id="localVideo" autoplay playsinline muted></video>
+        </div>
+
+        <div class="media">
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+    </div>
+
+    <script>
+    const startBtn = document.getElementById("start-btn");
+    const stopBtn = document.getElementById("stop-btn");
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+
+    let pc = null;
+    let localStream = null;
+
+    async function getBackCameraStream() {
+                try {
+            const s = await navigator.mediaDevices.getUserMedia({
+                video: { 
+                    facingMode: { exact: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            });
+            return s;
+        } catch (err) {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoInputs = devices.filter(d => d.kind === 'videoinput');
+                let chosen = videoInputs.find(d => /back|rear|environment|wide/i.test(d.label));
+                if (!chosen && videoInputs.length) chosen = videoInputs[videoInputs.length -1];
+                if (chosen){
+                    const s = await navigator.mediaDevices.getUserMedia({ 
+                        video: {
+                            deviceId: { exact: chosen.deviceId },
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        }, 
+                        audio: false 
+                    });
+                    return s;
+                }
+            } catch (e) {
+                console.error("Fallback camera error:", e);
+            }
+            return await navigator.mediaDevices.getUserMedia({ 
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }, 
+                audio: false 
+             });
+        }
+    }
+
+    async function negotiate() {
+        return pc.createOffer().then(offer => {
+            return pc.setLocalDescription(offer);
+        }).then (() => {
+            return  new Promise((resolve) => {
+                if (pc.iceGatheringState === 'complete') {
+                    resolve();
+                } else {
+                    const checkState = () => {
+                        if (pc.iceGatheringState ==='complete') {
+                            pc.removeEventListener('icegatheringstatechange', checkState);
+                            resolve();
+                        }
+                    };
+                    pc.addEventListener('icegatheringstatechange', checkState);
+                }
+            });
+        }).then(() => {
+            const offer = pc.localDescription;
+            return fetch('/offer', {
+                body: JSON.stringify({
+                    sdp: offer.sdp,
+                    type: offer.type,
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                method: 'POST'
+            });
+        }).then(response => {
+            return response.json();
+        }).then(answer => {
+            return pc.setRemoteDescription(answer);
+        }).catch(e => {
+            console.error("Negotiation error:", e);
+            alert("Failed to establish WebRTC connection: " + e.message);
+        });
+    }
+
+    startBtn.onclick = async () => {
+        startBtn.disabled = true;
+        startBtn.innerText = "Starting..."
+
+        try{
+            localStream = await getBackCameraStream();
+        } catch (err) {
+            alert("Unable to access camera: " + (err && err.message ? err.message : err));
+            startBtn.disabled = false;
+            startBtn.innerText = "Start Live Detection";
+            return;
+        }
+
+        localVideo.srcObject = localStream;
+
+        const config = {
+            iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
+        };
+        pc = new RTCPeerConnection(config);
+
+        localStream.getTracks().forEach(track => {
+            pc.addTrack(track, localStream);
+        });
+
+        pc.addEventListener('track', (evt) => {
+            console.log("Remote track received:", evt.track.kind);
+            if (evt.track.kind === 'video'){
+                if (remoteVideo.srcObject !== evt.streams[0]) {
+                    remoteVideo.srcObject = evt.streams[0];
+                    console.log("Remote video stream set");
+                }
+            }
+        });
+
+        pc.addEventListener('connectionstatechange', () => {
+            console.log("Connection state:", pc.iceConnectionState);
+            if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+               console.warn("Connection failed/disconnected");
+                stopBtn.click();
+            }
+        });
+
+        pc.addEventListener('iceconnectionstatechange', () => {
+            console.log("ICE connection state:", pc.iceConnectionState);
+        });
+
+        try {
+            await negotiate();
+            console.log("WebRTC connection established");
+
+            startBtn.style.display = "none";
+            stopBtn.style.display = "inline-block";
+            startBtn.disabled = false;
+            startBtn.innerText = "Start Live Detection";
+        } catch (e) {
+            console.error("Failed to start:", e);
+            alert("Failed to start WebRTC: " + e.message);
+            startBtn.disabled = false;
+            startBtn.innerText ="Start Live Detection";
+        }
+    };
+
+    stopBtn.onclick = async () => {
+        if (pc) {
+            pc.close();
+            pc = null;
+        }
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            localStream = null;
+        }
+
+        localVideo.srcObject = null;
+        remoteVideo.srcObject = null;
+
+        try{ 
+            await fetch('/close', { method: 'POST' });
+        } catch (e) {
+            console.error("Error closing connection:", e);
+        }
+
+        startBtn.style.display = "inline-block";
+        stopBtn.style.display = "none";
+    };
+    </script>
+</body>
+</html>
