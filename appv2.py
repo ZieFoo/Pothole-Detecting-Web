@@ -25,41 +25,17 @@ def get_lan_ip():
 LAN_IP = get_lan_ip()
 print(f"Server LAN IP: {LAN_IP}")
 
-# PHONE_CAMERA_URL = "http://192.168.68.120:8080/video"
 MODEL_FILE = "best.onnx"
 CONFIDENCE = 0.65
 IOU_THRESHOLD = 0.45
-FRAME_SKIP = 2
+TARGET_FPS = 4.0
 
 model = ort.InferenceSession(MODEL_FILE, providers=['CPUExecutionProvider'])
 
 latest_frame = None
 annotated_frame = None
 frame_lock = Lock()
-
 WORKER_RUNNING = True
-TARGET_FPS = 4.0
-
-# def main():
-#         serve(app, host='0.0.0.0', port=5000)
-
-class ThreadedCamera:
-    def __init__(self, src):
-        self.cap = cv2.VideoCapture(src)
-        self.ret, self.frame = self.cap.read()
-        self.stopped = False
-        Thread(target=self.update, daemon=True).start()
-
-    def update(self):
-        while not self.stopped:
-            self.ret, self.frame = self.cap.read()
-
-    def read(self):
-        return self.ret, self.frame
-    
-    def release(self):
-        self.stopped = True
-        self.cap.release()
 
 def prepare_image(frame):
     h, w = frame.shape[:2]
@@ -176,57 +152,53 @@ worker_thread.start()
 
 @sock.route('/ws')
 def ws_frame_receiver(ws):
-
     global latest_frame
     print("Websocket connected! (receiver)")
 
-    while True:
-        frame_bytes = ws.receive()
-        if frame_bytes is None:
-            print("Websocket is disconnected.")
-            break
-        
-        np_arr = np.frombuffer(frame_bytes, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        if frame is None:
-            continue
-        with frame_lock:
-            latest_frame = frame
+    try:
+        while True:
+            frame_bytes = ws.receive()
+            if frame_bytes is None:
+                print("Websocket (receiver) disconnected.")
+                break
+            
+            if isinstance(frame_bytes, str):
+                continue
 
-def video_stream():
-    print("Serving MJPEG stream from annotated_frame...")
-    global annotated_frame
+            np_arr = np.frombuffer(frame_bytes, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+            with frame_lock:
+                latest_frame = frame
+    except Exception as e:
+        print("ws_frame_receiver error:", e)
+
+@sock.route('/ws_out')
+def ws_frame_sender(ws):
+    global latest_frame
+    print("Websocket connected! (sender)")
     try:
         while True:
             with frame_lock:
                 out = None if annotated_frame is None else annotated_frame.copy()
             if out is None:
-                blank = np.zeros((480,640,3), dtype=np.uint8)
-                _, jpeg = cv2.imencode('.jpg', blank)
-                frame = jpeg.tobytes()
-            else:
-                _, jpeg = cv2.imencode('.jpg', out)
-                frame = jpeg.tobytes()     
+                time.sleep(0.02)
+                continue
 
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            _, jpeg = cv2.imencode('.jpg', out, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            try:
+                ws.send(jpeg.tobytes())
+            except Exception:
+                print("ws_out: client disconnected or send error")
+                break
             time.sleep(0.03)
-    finally:
-        pass
+    except Exception as e:
+        print("ws_frame_sender error:", e)
 
 @app.route('/')
 def home():
     return render_template('indexv2.html')
-
-@app.route('/video')
-def video():
-    return render_template('video.html')
-
-@app.route('/video_feed')
-def video_feed():
-    return Response(video_stream(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
 
 if __name__ == '__main__':
     print("=" * 50)
@@ -235,12 +207,10 @@ if __name__ == '__main__':
     print(f"Model: {MODEL_FILE}")
     print(f"Confidence Threshold: {CONFIDENCE}")
     print(f"IoU Threshold: {IOU_THRESHOLD}")
-    print(f"Frame Skip (unused by worker): {FRAME_SKIP}")
+    print(f"Target push FPS (ws_out): {TARGET_FPS}")
     print("=" * 50)
     print(f"Open browser on PC or phone: http://{LAN_IP}:5000")
     print("Press Ctrl+C to stop")
     print("=" * 50)
 
     app.run(host='0.0.0.0', port=5000, debug=True)
-
-    # main()

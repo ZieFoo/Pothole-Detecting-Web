@@ -10,62 +10,94 @@
             color: #fff;
             font-family: Arial, sans-serif;
             text-align: center;
-            padding: 20px;
+            padding: 16px;
         }
         h1{
-            margin-bottom: 25px;
+            margin-bottom: 18px;
             color: #00ff88;
             text-shadow: 0 0 10px #00ff88;
         }
-        video{
+        .media-row {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .media {
             width: 90%;
-            max-width: 600px;
+            max-width: 360px;
             border: 3px solid #00ff88;
             border-radius: 12px;
-            margin-top: 20px;
             box-shadow: 0 0 15px #00ff88;
+            overflow: hidden;
+            background: #000;
         }
+        video, img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        #controls { margin-top: 12px; }
         button{
-            padding: 12px 24px;
+            padding: 10px 18px;
             border: none;
             border-radius: 8px;
-            font-size: 18px;
+            font-size: 16px;
             cursor: pointer;
             background: #00ff88;
             color: #111;
             font-weight: bold;
-            transition: 0.2s ease;
-            margin-top: 15px;
+            transition: 0.15s ease;
+            margin: 6px;
         }
-        button:hover{ background: #00ff88; }
-        button:active{ transform: scale(0.95); }
-        #controls { margin-top: 12px; }
+        button:active { transform: scale(0.98); }
+        small { display:block; margin-top:8px; color:#9f9; }
     </style>
 </head>
 <body>
-    <h1>Pothole Detection</h1>
+    <h1>Pothole Detection - Live </h1>
     
     <div id="controls">
         <button id="start-btn">Start Live Detection</button>
-        <button id="video-btn" style="display:none;">Go to Live Video</button>
-        <button id="view-now" style="margin-left:8px;">Open Detection Page</button>
+        <button id="stop-btn" style="display:none;">Stop</button>
+        <button id="open-video" style="display:inline-block;">Open Server Video Page</button>
+        <small>Left: Raw camera preview — Right: Annotated (Server detection)</small>
     </div>
 
-    <video id="localVideo" autoplay playsinline></video>
+    <div class="media-row">
+        <div class="media">
+            <video id="localVideo" autoplay playsinline muted></video>
+        </div>
+
+        <div class="media">
+            <img id="serverOut" alt="Annotated stream (server)" />
+        </div>
+    </div>
 
     <script>
     const startBtn = document.getElementById("start-btn");
-    const videoBtn = document.getElementById("video-btn");
-    const viewNowBtn = document.getElementById("view-now");
+    const stopBtn = document.getElementById("stop-btn");
+    const openVideoBtn = document.getElementById("open-video");
     const video = document.getElementById("localVideo");
+    const serverOutImg = document.getElementById("serverOut");
 
-    let ws = null;
+    let ws_in = null;
+    let ws_out = null;
+    let sendInterval = null;
     const SEND_WIDTH = 360;
-    const SEND_JPEG_QUALITY = 0.5;
+    const SEND_JPEG_QUALITY = 0.6;
+    const SEND_INTERVAL_MS = 100;
 
-    viewNowBtn.onclick = () => {
+    openVideoBtn.onclick = () => {
         window.open("/video", "_blank");
     };
+
+    function getProtocolHost(path) {
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        return `${protocol}://${window.location.host}${path}`;
+    }
 
     async function getBackCameraStream() {
                 try {
@@ -80,13 +112,56 @@
                 let chosen = videoInputs.find(d => /back|rear|environment|wide/i.test(d.label));
                 if (!chosen && videoInputs.length) chosen = videoInputs[videoInputs.length -1];
                 if (chosen){
-                    const s = await navigator.mediaDevices.getUserMedia({ video: {deviceId : { exact: chosen.deviceId } } });
+                    const s = await navigator.mediaDevices.getUserMedia({ video: {deviceId : { exact: chosen.deviceId } }, audio: false });
                     return s;
                 }
             } catch (e) {
+
             }
-            return await navigator.mediaDevices.getUserMedia({ video: true });
+            return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         }
+    }
+
+    function startWebSocketOut() {
+        const url = getProtocolHost("/ws_out");
+        ws_out = new WebSocket(url);
+        ws_out.binaryType = "arraybuffer";
+        ws_out.onopen = () => {
+            console.log("ws_out connected");
+        };
+        ws_out.onmessage = (evt) => {
+            try {
+                const blob = new Blob([evt.data], {type:"image/jpeg"});
+                const objectURL = URL.createObjectURL(blob);
+                serverOutImg.onload = () => {
+                    try { URL.revokeObjectURL(objectURL); } catch (e) {}
+                };
+                serverOutImg.src = objectURL;
+            } catch (e) {
+                console.error("ws_out onmessage error", e);
+            }
+        };
+        ws_out.onclose = () => {
+            console.log("ws_out closed");
+        };
+        ws_out.onerror = (e) => {
+            console.log("ws_out error", e);
+        };
+    }
+
+    function startWebSocketIn() {
+        const url = getProtocolHost("/ws");
+        ws_in = new WebSocket(url);
+        ws_in.binaryType = "arraybuffer";
+        ws_in.onopen = () => {
+            console.log("ws_in connected");
+        };
+        ws_in.onclose = () => {
+            console.log("ws_out closed");
+        };
+        ws_in.onerror = (e) => {
+            console.log("ws_out error", e);
+        };
     }
 
     startBtn.onclick = async () => {
@@ -97,60 +172,73 @@
         try {
             stream = await getBackCameraStream();
         } catch (err) {
-            alert("Unable to access camera: " + err.message);
+            alert("Unable to access camera: " + (err && err.message ? err.message : err));
             startBtn.disabled = false;
             startBtn.innerText = "Start Live Detection";
             return;
         }
 
         video.srcObject = stream;
+        try {
+            await video.play();
+        } catch (e) {
 
-        await new Promise(resolve => {
-            video.onloadedmetadata = () => {
-                video.play();
-                resolve();
-            };
-        });
+        }
 
-        const lan_host = window.location.hostname;
-        //ws = new WebSocket(`ws://${lan_host}:5000/ws`);
-        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-        ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
-
-        ws.onopen = () => {
-            console.log("Websocket connected.");
-            startBtn.style.display= "none";
-            videoBtn.style.display = "inline-block";
-        };
-
-        ws.onclose = () => {
-            console.log("Websocket closed.")
-        };
+        startWebSocketIn();
+        startWebSocketOut();
 
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
 
-        const sendIntervalMs = 100;
-        setInterval(() => {
-            if (!video.videoWidth || !video.videoHeight) return;
+        if (sendInterval) clearInterval(sendInterval);
 
+        sendInterval = setInterval(async ()=> {
+            if (!video.videoWidth || !video.videoHeight) return;
             const ar = video.videoWidth / video.videoHeight;
             const w = SEND_WIDTH;
             const h = Math.round(SEND_WIDTH / ar);
             canvas.width = w;
             canvas.height = h;
             ctx.drawImage(video, 0, 0, w, h);
-            canvas.toBlob(blob => {
-                if (ws && ws.readyState == WebSocket.OPEN) {
-                    blob.arrayBuffer().then(buf => ws.send(buf));
+
+            canvas.toBlob(async (blob) => {
+                if (!blob) return;
+                if (ws_in && ws_in.readyState === WebSocket.OPEN) {
+                    try {
+                        const buf = await blob.arrayBuffer();
+                        ws_in.send(buf);
+                    } catch (e) {
+                         console.warn("send error:", e);
+                    }
                 }
-            }, "image/jpeg", SEND_JPEG_QUALITY);
-        }, sendIntervalMs);
+            }, 'image/jpeg', SEND_JPEG_QUALITY);
+        }, SEND_INTERVAL_MS);
+
+        startBtn.style.display ="none";
+        stopBtn.style.display = "inline-block";
+        startBtn.disabled = false;
+        startBtn.innerText = "Start Live Detection"
     };
 
-    videoBtn.onclick = () => {
-        window.location.href = "/video";
-    };
+    stopBtn.onclick = () => {
+        if (sendInterval) {
+            clearInterval(sendInterval);
+            sendInterval = null;
+        }
+        try{ if (ws_in) ws_in.close(); } catch (e) {}
+        try{ if (ws_out) ws_out.close(); } catch (e) {e}
+
+        try{
+            const tracks = video.srcObject ? video.srcObject.getTracks() : [];
+            tracks.forEach(t => t.stop());
+            video.srcObject = null;
+        } catch (e) {}
+
+        startBtn.style.display = "inline-block";
+        stopBtn.style.display = "none";
+    }
+
     </script>
 </body>
 </html>
