@@ -267,8 +267,15 @@
                 };
 
                 ws_detected.onclose = () => {
-                    console.log("Detected feed Websocket closed");
+                    console.log("Detected feed WebSocket closed");
                     if(detectedTimeout) clearTimeout(detectedTimeout);
+                    hasDetectedFeed = false;
+                    updateStatus();
+                };
+
+                ws_detected.onerror = (e) => {
+                    console.log("Detected feed WebSocket error:", e);
+                    if (detectedTimeout) clearTimeout(detectedTimeout);
                     hasDetectedFeed = false;
                     updateStatus();
                 };

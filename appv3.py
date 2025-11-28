@@ -7,6 +7,9 @@ from flask_sock import Sock
 from threading import Thread, Lock
 import socket
 import asyncio
+import json
+import os
+from datetime import datetime
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
@@ -29,9 +32,10 @@ LAN_IP = get_lan_ip()
 print(f"Server LAN IP: {LAN_IP}")
 
 MODEL_FILE = "best.onnx"
-CONFIDENCE = 0.65
+CONFIDENCE = 0.5
 IOU_THRESHOLD = 0.45
-TARGET_FPS = 4.0
+TARGET_FPS = 1.0
+POTHOLE_LOG_FILE = "pothole_detections.json"
 
 model = ort.InferenceSession(MODEL_FILE, providers=['CPUExecutionProvider'])
 
@@ -43,6 +47,9 @@ WORKER_RUNNING = True
 viewer_clients_live = set()
 viewer_clients_detected = set()
 viewer_lock = Lock()
+
+current_detections = {"count": 0, "max_confidence": 0.0}
+detection_lock = Lock()
 
 pcs = set()
 relay = MediaRelay()
@@ -191,6 +198,10 @@ def inference_worker():
         with frame_lock:
             annotated_frame = out
 
+        with detection_lock:
+            current_detections["count"] = len(detections)
+            current_detections["max_confidence"] = max([d['confidence'] for d in detections], default=0.0)
+
         broadcast_to_viewers(src, out)
 
         print(f"[worker] inference {(end-start)*1000:.0f} ms | detections {len(detections)}")
@@ -235,6 +246,10 @@ def home():
 def viewer():
     return render_template('viewer.html')
 
+@app.route('/map')
+def pothole_map():
+    return render_template('pothole_map.html')
+
 @sock.route('/ws_viewer_live')
 def ws_viewer_live(ws):
     print("Viewer Websocket connected (live feed)")
@@ -259,7 +274,7 @@ def ws_viewer_detected(ws):
         while True:
             time.sleep(1)
     except Exception as e:
-        print(f"Viewer Websocket error: {e}")
+        print(f"Viewer detected Websocket error: {e}")
     finally: 
         with viewer_lock:
             viewer_clients_detected.discard(ws)
@@ -318,6 +333,58 @@ def close():
 
     return jsonify({"status": "closed"})
 
+@app.route('/log_pothole', methods=['POST'])
+def log_pothole():
+    try:
+        data = request.get_json()
+
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "latitude": data.get('latitude'),
+            "longitude": data.get('longitude'),
+            "accuracy": data.get('accuracy'),
+            "confidence": data.get('confidence'),
+            "detection_count": data.get('detection_count', 1)
+        }
+
+        if os.path.exists(POTHOLE_LOG_FILE):
+            with open(POTHOLE_LOG_FILE, 'r') as f:
+                try:
+                    detections = json.load(f)
+                except json.JSONDecodeError:
+                    detections = []
+        else:
+            detections = []
+
+        detections.append(log_entry)
+
+        with open(POTHOLE_LOG_FILE, "w") as f:
+            json.dump(detections, f, indent=2)
+
+        print(f"[GPS] Pothole logged at ([{log_entry['latitude']}, {log_entry['longitude']}])")
+
+        return jsonify({"status": "logged", "entry": log_entry})
+    except Exception as e:
+        print(f"Error logging pothole: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+@app.route('/get_potholes', methods=['GET'])
+def get_potholes():
+    try:
+        if os.path.exists(POTHOLE_LOG_FILE):
+            with open(POTHOLE_LOG_FILE, 'r') as f:
+                detections = json.load(f)
+            return jsonify({"status": "success", "detections": detections})
+        else:
+            return jsonify({"status": "success", "detections": []})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+@app.route('/get_detection_info', methods=['GET'])
+def get_detection_info():
+    with detection_lock:
+        return jsonify(current_detections)
+    
 if __name__ == '__main__':
     print("=" * 50)
     print("Starting Pothole Detection Server")
@@ -329,7 +396,9 @@ if __name__ == '__main__':
     print("=" * 50)
     print(f"Open browser on PC or phone: http://{LAN_IP}:5000")
     print(f"Desktop viewer page: http://{LAN_IP}:5000/viewer")
+    print(f"Pothole map viewer:  http://{LAN_IP}:5000/map")
+    print(f"GPS logs saved to:   {POTHOLE_LOG_FILE}")
     print("Press Ctrl+C to stop")
     print("=" * 50)
 
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False)

@@ -63,6 +63,7 @@
         <button id="start-btn">Start Live Detection</button>
         <button id="stop-btn" style="display:none;">Stop</button>
         <button id="viewer-btn" onclick="window.open('/viewer', '_blank')">Open Viewer Page</button>
+        <button onclick="window.open('/map', '_blank')" style="background: #ff8800;">View Pothole Map</button>
         <small>Left: Raw camera preview — Right: Annotated (Server detection via WebRTC)</small>
     </div>
 
@@ -84,6 +85,12 @@
 
     let pc = null;
     let localStream = null;
+    let gpsWatchId = null;
+    let currentLocation = null;
+    let lastLoggedTime = 0;
+    let detectionPollInterval = null;
+    const LOG_INTERVAL = 5000;
+    const DETECTION_POLL_INTERVAL = 2000;
 
     async function getBackCameraStream() {
                 try {
@@ -123,6 +130,104 @@
                 }, 
                 audio: false 
              });
+        }
+    }
+
+    function startGPSTracking() {
+        if (!navigator.geolocation) {
+            console.warn("Geolocation not supported");
+            return;
+        }
+
+        gpsWatchId = navigator.geolocation.watchPosition(
+            (position) => {
+                currentLocation = {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy
+                };
+                console.log(`GPS: ${currentLocation.latitude}, ${currentLocation.longitude}`);
+            },
+            (error) => {
+                console.error("GPS error:", error);
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 1000,
+                timeout: 5000
+            }
+        );
+    }
+
+    function stopGPSTracking() {
+        if (gpsWatchId !== null) {
+            navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null;
+            currentLocation = null;
+        }
+    }
+
+    async function logPotholeDetection(detectionCount, confidence) {
+        if (!currentLocation) {
+            console.warn("No GPS location available");
+            return;
+        }
+
+        if (detectionCount === 0) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now - lastLoggedTime <  LOG_INTERVAL) {
+            return;
+        }
+        lastLoggedTime = now;
+
+        try {
+            const response = await fetch('/log_pothole', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    latitude: currentLocation.latitude,
+                    longitude: currentLocation.longitude,
+                    accuracy: currentLocation.accuracy,
+                    confidence: confidence,
+                    detection_count: detectionCount
+                })
+            });
+
+            const result = await response.json();
+            if (result.status === 'logged') {
+                console.log('Pothole logged:', result.entry);
+            }
+        } catch (err) {
+            console.error('Error logging pothole:', err);
+        }
+    }
+
+    async function pollDetections() {
+        try {
+            const response = await fetch('/get_detection_info');
+            const data = await response.json();
+
+            if (data.count > 0) {
+                await logPotholeDetection(data.count, data.max_confidence);
+            }
+        } catch (err) {
+            console.error('Error polling detections:', err);
+        }
+    }
+
+    function startDetectionPolling() {
+        detectionPollInterval= setInterval(pollDetections, DETECTION_POLL_INTERVAL);
+    }
+
+    function stopDetectionPolling() {
+        if (detectionPollInterval) {
+            clearInterval(detectionPollInterval);
+            detectionPollInterval = null;
         }
     }
 
@@ -180,6 +285,8 @@
 
         localVideo.srcObject = localStream;
 
+        startGPSTracking();
+
         const config = {
             iceServers: [{urls: 'stun:stun.l.google.com:19302'}]
         };
@@ -200,7 +307,7 @@
         });
 
         pc.addEventListener('connectionstatechange', () => {
-            console.log("Connection state:", pc.iceConnectionState);
+            console.log("Connection state:", pc.connectionState);
             if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
                console.warn("Connection failed/disconnected");
                 stopBtn.click();
@@ -215,6 +322,8 @@
             await negotiate();
             console.log("WebRTC connection established");
 
+            startDetectionPolling();
+
             startBtn.style.display = "none";
             stopBtn.style.display = "inline-block";
             startBtn.disabled = false;
@@ -224,6 +333,7 @@
             alert("Failed to start WebRTC: " + e.message);
             startBtn.disabled = false;
             startBtn.innerText ="Start Live Detection";
+            stopGPSTracking();
         }
     };
 
@@ -236,6 +346,9 @@
             localStream.getTracks().forEach(track => track.stop());
             localStream = null;
         }
+
+        stopGPSTracking();
+        stopDetectionPolling();
 
         localVideo.srcObject = null;
         remoteVideo.srcObject = null;
