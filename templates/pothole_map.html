@@ -18,7 +18,7 @@
                 text-align: center;
             }
             .container {
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
             }
             .stats {
@@ -61,6 +61,7 @@
             td {
                 padding: 12px 15px;
                 border-bottom: 1px solid #333;
+                vertical-align: middle;
             }
             tr:hover {
                 background: #2a2a2a;
@@ -72,6 +73,12 @@
             .coords {
                 font-family: monospace;
                 color: #9f9;
+            }
+            .bbox {
+                font-family: monospace;
+                font-size: 11px;
+                color: #888;
+                max-width: 200px;
             }
             button {
                 padding: 12px 24px;
@@ -92,25 +99,219 @@
             .export-btn:hover {
                 background: #cc6600;
             }
+            .thumbnail {
+                width: 120px;
+                height: 90px;
+                object-fit: cover;
+                border-radius: 6px;
+                cursor: pointer;
+                border: 2px solid #333;
+                transition: 0.2s;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            }
+            .thumbnail:hover {
+                border-color: #00ff88;
+                transform: scale(1.05);
+                box-shadow: 0 4px 12px rgba(0,255,136,0.3);
+            }
+            .no-image {
+                width: 120px;
+                height: 90px;
+                background: #333;
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 11px;
+                color: #666;
+                border: 2px dashed #444;
+            }
+            .validation-btns {
+                display: flex;
+                gap: 5px;
+                align-items: center;
+            }
+            .val-btn {
+                padding: 8px 14px;
+                font-size: 13px;
+                border-radius: 6px;
+                border: none;
+                cursor: pointer;
+                font-weight: bold;
+                transition: 0.2s;
+            }
+            .val-yes {
+                background: #00cc00;
+                color: #fff;
+            }
+            .val-yes:hover {
+                background: #00ff00;
+            }
+            .val-no {
+                background: #cc0000;
+                color: #fff;
+            }
+            .val-no:hover {
+                background: #ff0000;
+            }
+            .val-yes.active {
+                box-shadow: 0 0 10px #00ff00;
+                border: 2px solid #00ff00;
+            }
+            .val-no.active {
+                box-shadow: 0 0 10px #ff0000;
+                border: 2px solid #ff0000;
+            }
+            .validation-status {
+                font-size: 12px;
+                padding: 6px 10px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            .status-valid {
+                background: #00cc00;
+                color: #fff;
+            }
+            .status-invalid {
+                background: #cc0000;
+                color: #fff;
+            }
+            .status-pending {
+                background: #888;
+                color: #fff;
+            }
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1000;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.95);
+                animation: fadeIn 0.2s;
+            }
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+            .modal-content {
+                margin: 50px auto;
+                display: block;
+                max-width: 90%;
+                max-height: 80%;
+                border-radius: 8px;
+                box-shadow: 0 4px 20px rgba(0,255,136,0.3);
+            }
+            .close {
+                position: absolute;
+                top: 30px;
+                right: 50px;
+                color: #fff;
+                font-size: 40px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: 0.2s;
+            }
+            .close:hover {
+                color: #00ff88;
+                transform: scale(1.1);
+            }
+            .modal-info {
+                position: absolute;
+                top: 100px;
+                left: 50px;
+                background: rgba(0,0,0,0.8);
+                padding: 15px;
+                border-radius: 8px;
+                border: 2px solid #00ff88;
+                max-width: 300px;
+            }
+            .modal-info h3 {
+                color: #00ff88;
+                margin-top: 0;
+            }
+            .modal-info p {
+                margin: 5px 0;
+                font-size: 14px;
+            }
+            .filter-controls {
+                background: #222;
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                display: flex;
+                gap: 15px;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+            .filter-controls label {
+                color: #00ff88;
+                font-weight: bold;
+            }
+            .filter-controls select {
+                padding: 8px;
+                border-radius: 4px;
+                background: #333;
+                color: #fff;
+                border: 1px solid #00ff88;
+            }
+            .image-indicator {
+                display: inline-block;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 11px;
+                font-weight: bold;
+                margin-left: 5px;
+            }
+            .has-image {
+                background: #00cc00;
+                color: #fff;
+            }
+            .no-image-indicator {
+                background: #666;
+                color: #fff;
+            }
         </style>
     </head>
     <body>
         <div class ="container">
-            <h1>Pothole Detection Map</h1>
+            <h1>Pothole Detection Map & Validation</h1>
 
             <div class="stats">
                 <div class="stat-card">
                     <div class="stat-value" id="totalCount">0</div>
-                    <div class="stat-label">Total Detection</div>
+                    <div class="stat-label">Total Detections</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="validatedCount">0</div>
+                    <div class="stat-label">Validated</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="confirmedCount">0</div>
+                    <div class="stat-label">Confirmed Potholes</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-value" id="avgConfidence">0%</div>
                     <div class="stat-label">Average Confidence</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="avgAccuracy">0</div>
-                    <div class="stat-label">Average Accuracy</div>
                 </div>                
+            </div>
+
+            <div class="filter-controls">
+                <label for="filterValidation">Filter by:</label>
+                <select id="filterValidation" onchange="applyFilters()">
+                    <option value="all">All Detections</option>
+                    <option value="pending">Pending Validation</option>
+                    <option value="valid">Confirmed Potholes</option>
+                    <option value="invalid">False Positives</option>
+                </select>
+
+                <label for="filterImage" style="margin-left: 20px;">Show:</label>
+                <select id="filterImage" onchange="applyFilters()">
+                    <option value="all">All</option>
+                    <option value="with-image">With Screenshots Only</option>
+                    <option value="no-image">No Screenshots Only</option>
+                </select>
             </div>
 
             <div style="text-align: center; margin-bottom: 20px;">
@@ -123,12 +324,12 @@
                 <thead>
                     <tr>
                         <th>#</th>
+                        <th>Screenshot (Click to Enlarge)</th>
                         <th>Timestamp</th>
-                        <th>Latitude</th>
-                        <th>Longitude</th>
+                        <th>GPS Location</th>
                         <th>Confidence</th>
-                        <th>Count</th>
-                        <th>Accuracy</th>
+                        <th>Bounding Boxes</th>
+                        <th>Validation</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -140,8 +341,15 @@
             </table>
         </div>
 
+        <div id="imageModal" class="modal" onclick="closeModal()">
+            <span class="close">&times;</span>
+            <div class="modal-info" id="modalInfo"></div>
+            <img class="modal-content" id="modalImage">
+        </div>
+
         <script>
             let potholes = [];
+            let filteredPotholes = [];
 
             async function loadPotholes() {
                 try {
@@ -150,7 +358,7 @@
 
                     if (data.status ==='success') {
                         potholes = data.detections;
-                        displayPotholes();
+                        applyFilters();
                         updateStats();
                     }
                 } catch (err) {
@@ -160,49 +368,172 @@
                 }
             }
 
+            function applyFilters() {
+                const validationFilter = document.getElementById('filterValidation').value;
+                const imageFilter = document.getElementById('filterImage').value;
+
+                filteredPotholes = potholes.filter(p => {
+                    let passValidation = true;
+                    if (validationFilter === 'pending') {
+                        passValidation = p.validated === null;
+                    } else if (validationFilter === 'valid') {
+                        passValidation = p.validated === true;
+                    } else if (validationFilter === 'invalid') {
+                        passValidation = p.validated === false;
+                    }
+
+                    let passImage = true;
+                    if (imageFilter === 'with-image') {
+                        passImage = p.screenshot !== null && p.screenshot !== undefined;
+                    } else if (imageFilter === 'no-image') {
+                        passImage = !p.screenshot;
+                    }
+
+                    return passValidation && passImage;
+                });
+
+                displayPotholes();
+            }
+
             function displayPotholes() {
                 const tbody = document.getElementById('tableBody');
 
-                if (potholes.length ===0){
-                    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No potholes detected yet</td></tr>';
+                if (filteredPotholes.length ===0){
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No potholes match the filters</td></tr>';
                     return;
                 }
 
-                tbody.innerHTML = potholes.map((p, index) => `
-                    <tr>
-                        <td>${index + 1}</td>
-                        <td>${new Date(p.timestamp).toLocaleString()}</td>
-                        <td class="coords">${p.latitude.toFixed(6)}</td>
-                        <td class="coords">${p.longitude.toFixed(6)}</td>
-                        <td class="confidence">${(p.confidence * 100).toFixed(1)}%</td>
-                        <td>${p.detection_count}</td>
-                        <td>${p.accuracy ? p.accuracy.toFixed(1) + 'm' : 'N/A'}</td>
-                        <td>
-                            <a href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" 
-                            target="_blank" style="color: #00ff88;">View Map</a>
-                        </td>
-                    </tr>
-                `).join('');
+                tbody.innerHTML = filteredPotholes.map((p, index) => {
+                    const imgHtml = p.screenshot
+                    ? `<img src="/screenshots/${p.screenshot}" class="thumbnail" onclick="openModal('${p.id}')" alt="Pothole Detection" title="Click to enlarge">`
+                    : `<div class="no-image">No Image</div>`;
+
+                    const bboxHtml = p.bounding_boxes && p.bounding_boxes.length > 0
+                    ? `<div style="max-height: 100px; overflow-y: auto;">${p.bounding_boxes.map((box, i) => `<div style="margin: 3px 0;">${i+1}: [${box.join(', ')}]</div>`).join('')}</div>`
+                    :  '<span style="color: #666;">N/A</span>';
+
+                    let validationHtml;
+                    if (p.validated === true) {
+                        validationHtml = '<span class="validation-status status-valid">Confirmed Pothole</span>';
+                    } else if (p.validated === false) {
+                        validationHtml = '<span class="validation-status status-invalid">False Positive</span>';
+                    } else {
+                        validationHtml = `
+                            <div class="validation-btns">
+                                <button class="val-btn val-yes" onclick="validatePothole('${p.id}', true)" title="Confirm this is a pothole">Pothole</button>
+                                <button class="val-btn val-no" onclick="validatePothole('${p.id}', false)" title="Mark as false positive">Not</button>
+                            </div>`;
+                    }
+
+                    const actualIndex = potholes.indexOf(p) + 1;
+
+                    return `
+                        <tr>
+                            <td><strong>#${actualIndex}</strong></td>
+                            <td style="text-align: center;">${imgHtml}</td>
+                            <td>
+                                ${new Date(p.timestamp).toLocaleString()}<br>
+                                <small style="color: #888;">${timeSince(new Date(p.timestamp))}</small>
+                            </td>
+                            <td class="coords">
+                                <strong>Latitude:</strong> ${p.latitude.toFixed(6)}<br>
+                                <strong>Longitude:</strong> ${p.longitude.toFixed(6)}<br>
+                                <small style="color: #888;">Accuracy: ±${p.accuracy ? p.accuracy.toFixed(1) + 'm' : 'N/A'}</small>
+                            </td>
+                            <td class="confidence">
+                                ${(p.confidence * 100).toFixed(1)}%<br>
+                                <small style="color: #888;">${p.detection_count} detection${p.detection_count > 1 ? 's' : ''}</small>
+                            </td>
+                            <td class="bbox">${bboxHtml}</td>
+                            <td>${validationHtml}</td>
+                            <td>
+                                <a href="https://www.google.com/maps?q=${p.latitude},${p.longitude}"
+                                target="_blank" style="color: #00ff88; text-decoration: none; font-weight: bold;">
+                                View on Map
+                                </a>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            function timeSince(date){
+                const seconds = Math.floor((new Date() - date)/ 1000);
+
+                if (seconds < 60) return 'Just now';
+                if (seconds < 3600) return Math.floor(seconds / 60) + ' min ago';
+                if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
+                return Math.floor(seconds / 86400) + ' days ago';
+            }
+
+            async function validatePothole(id, isValid) {
+                try {
+                    const response = await fetch('/validate_pothole', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            id: id,
+                            is_valid: isValid
+                        })
+                    });
+
+                    const result = await response.json();
+                    if (result.status === 'success') {
+                        console.log(`Pothole ${id} validated as ${isValid ? 'valid' : 'invalid'}`);
+                        await loadPotholes();
+                    }
+                } catch (err) {
+                    console.error('Error validating pothole:', err);
+                    alert('Failed to save validation. Please try again.');
+                }
             }
 
             function updateStats() {
                 document.getElementById('totalCount').textContent = potholes.length;
 
+                const validated = potholes.filter(p => p.validated !== null);
+                document.getElementById('validatedCount').textContent = validated.length;
+
+                const confirmed = potholes.filter(p => p.validated === true);
+                document.getElementById('confirmedCount').textContent = confirmed.length;
+
                 if (potholes.length > 0) {
                     const avgConf = potholes.reduce((sum, p) => sum + p.confidence,0) / potholes.length;
                     document.getElementById('avgConfidence').textContent = (avgConf * 100).toFixed(1) +'%';
-
-                    const validAccuracies = potholes.filter(p => p.accuracy).map(p => p.accuracy);
-                    if (validAccuracies.length > 0) {
-                        const avgAcc = validAccuracies.reduce((sum, a) => sum + a, 0) / validAccuracies.length;
-                        document.getElementById('avgAccuracy').textContent = avgAcc.toFixed(1) + 'm';
-                    }
                 }
+            }
+
+            function openModal(id) {
+                const pothole = potholes.find(p => p.id === id);
+                if (!pothole || !pothole.screenshot) return;
+
+                const modal = document.getElementById('imageModal');
+                const modalImg = document.getElementById('modalImage');
+                const modalInfo = document.getElementById('modalInfo');
+
+                modal.style.display = 'block';
+                modalImg.src =`/screenshots/${pothole.screenshot}`;
+
+                modalInfo.innerHTML = `
+                    <h3>Detection Details</h3>
+                    <p><strong>Time:</strong> ${new Date(pothole.timestamp).toLocaleString()}</p>
+                    <p><strong>Confidence:</strong> ${(pothole.confidence * 100).toFixed(1)}%</p>
+                    <p><strong>Detections:</strong> ${pothole.detection_count}</p>
+                    <p><strong>Location:</strong> ${pothole.latitude.toFixed(6)}, ${pothole.longitude.toFixed(6)}</p>
+                    ${pothole.bounding_boxes && pothole.bounding_boxes.length > 0 ?
+                        `<p><strong>Boxes:</strong> ${pothole.bounding_boxes.length}</p>` : ''}
+                `;
+            }
+
+            function closeModal() {
+                document.getElementById('imageModal').style.display = 'none';
             }
 
             function exportToCSV() {
                 const csv = [
-                    ['Index', 'Timestamp', 'Latitude', 'Longitude', 'Confidence', 'Count', 'Accuracy'],
+                    ['Index', 'Timestamp', 'Latitude', 'Longitude', 'Confidence', 'Count', 'Accuracy', 'Validated', 'Screenshot', 'BoundingBoxes'],
                     ...potholes.map((p, i) => [
                         i + 1,
                         p.timestamp,
@@ -210,7 +541,10 @@
                         p.longitude,
                         p.confidence,
                         p.detection_count,
-                        p.accuracy || 'N/A'
+                        p.accuracy || 'N/A',
+                        p.validated === null ? 'Pending' : (p.validated ? 'Valid' : 'Invalid'),
+                        p.screenshot || 'N/A',
+                        p.bounding_boxes ? JSON.stringify(p.bounding_boxes) : 'N/A'
                     ])
                 ].map(row => row.join(',')).join('\n');
 
@@ -227,11 +561,14 @@
                             coordinates: [p.longitude, p.latitude]
                         },
                         properties: {
-                            id: i + 1,
+                            id: p.id,
                             timestamp: p.timestamp,
                             confidence: p.confidence,
                             detection_count: p.detection_count,
-                            accuracy: p.accuracy
+                            accuracy: p.accuracy,
+                            validated: p.validated,
+                            screenshot: p.screenshot,
+                            bounding_boxes: p.bounding_boxes
                         }
                     }))
                 };
@@ -249,9 +586,20 @@
                 URL.revokeObjectURL(url);
             }
 
+            document.addEventListener('keydown', (e) => {
+                if(e.key === 'Escape') closeModal();
+            });
+
+            document.getElementById('modalImage').onclick = (e) => {
+                e.stopPropagation();
+            };
+            document.getElementById('modalInfo').onclick= (e) => {
+                e.stopPropagation();
+            }
+
             loadPotholes();
             
-            setInterval(loadPotholes, 1000);
+            setInterval(loadPotholes, 10000);
         </script>
     </body>
 </html>

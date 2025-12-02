@@ -2,13 +2,14 @@ import cv2
 import time
 import numpy as np
 import onnxruntime as ort
-from flask import Flask, Response, render_template, request, jsonify
+from flask import Flask, Response, render_template, request, jsonify, send_from_directory
 from flask_sock import Sock
 from threading import Thread, Lock
 import socket
 import asyncio
 import json
 import os
+import base64
 from datetime import datetime
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.contrib.media import MediaRelay
@@ -32,10 +33,13 @@ LAN_IP = get_lan_ip()
 print(f"Server LAN IP: {LAN_IP}")
 
 MODEL_FILE = "best.onnx"
-CONFIDENCE = 0.5
+CONFIDENCE = 0.75
 IOU_THRESHOLD = 0.45
 TARGET_FPS = 1.0
 POTHOLE_LOG_FILE = "pothole_detections.json"
+SCREENSHOTS_DIR = "pothole_screenshots"
+
+os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 
 model = ort.InferenceSession(MODEL_FILE, providers=['CPUExecutionProvider'])
 
@@ -48,7 +52,7 @@ viewer_clients_live = set()
 viewer_clients_detected = set()
 viewer_lock = Lock()
 
-current_detections = {"count": 0, "max_confidence": 0.0}
+current_detections = {"count": 0, "max_confidence": 0.0, "boxes": []}
 detection_lock = Lock()
 
 pcs = set()
@@ -201,6 +205,7 @@ def inference_worker():
         with detection_lock:
             current_detections["count"] = len(detections)
             current_detections["max_confidence"] = max([d['confidence'] for d in detections], default=0.0)
+            current_detections["boxes"] = [d['box'] for d in detections]
 
         broadcast_to_viewers(src, out)
 
@@ -249,6 +254,10 @@ def viewer():
 @app.route('/map')
 def pothole_map():
     return render_template('pothole_map.html')
+
+@app.route('/screenshots/<filename>')
+def serve_screenshot(filename):
+    return send_from_directory(SCREENSHOTS_DIR, filename)
 
 @sock.route('/ws_viewer_live')
 def ws_viewer_live(ws):
@@ -338,13 +347,39 @@ def log_pothole():
     try:
         data = request.get_json()
 
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        screenshot_filename = f"pothole_{timestamp}.jpg"
+        screenshot_path = os.path.join(SCREENSHOTS_DIR, screenshot_filename)
+
+        if 'screenshot' in data and data['screenshot']:
+            try:
+                img_data = data['screenshot']
+                if ',' in img_data:
+                    img_data = img_data.split(',')[1]
+
+                img_bytes = base64.b64decode(img_data)
+                nparr = np.frombuffer(img_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                cv2.imwrite(screenshot_path, img)
+                print(f"Screenshot saved: {screenshot_filename}")
+            except Exception as e:
+                print(f"Error saving screenshot: {e}")
+                screenshot_filename = None
+        else:
+            screenshot_filename = None
+
         log_entry = {
+            "id": timestamp,
             "timestamp": datetime.now().isoformat(),
             "latitude": data.get('latitude'),
             "longitude": data.get('longitude'),
             "accuracy": data.get('accuracy'),
             "confidence": data.get('confidence'),
-            "detection_count": data.get('detection_count', 1)
+            "detection_count": data.get('detection_count', 1),
+            "bounding_boxes": data.get('bounding_boxes', []),
+            "screenshot": screenshot_filename,
+            "validated": None
         }
 
         if os.path.exists(POTHOLE_LOG_FILE):
@@ -366,6 +401,33 @@ def log_pothole():
         return jsonify({"status": "logged", "entry": log_entry})
     except Exception as e:
         print(f"Error logging pothole: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/validate_pothole', methods=['POST'])
+def validate_pothole():
+    try:
+        data = request.get_json()
+        pothole_id = data.get('id')
+        is_valid = data.get('is_valid')
+
+        if os.path.exists(POTHOLE_LOG_FILE):
+            with open(POTHOLE_LOG_FILE, 'r') as f:
+                detections = json.load(f)
+
+            for detection in detections:
+                if detection.get('id') == pothole_id:
+                    detection['validated'] = is_valid
+                    break
+                    
+            with open(POTHOLE_LOG_FILE, "w") as f:
+                json.dump(detections, f, indent=2)
+
+            return jsonify({"status": "success", "id": pothole_id, "validated": is_valid})
+        else:
+            return jsonify({"status": "error", "message": "Log file not found"}), 404
+        
+    except Exception as e:
+        print(f"Error validating pothole: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
     
 @app.route('/get_potholes', methods=['GET'])
@@ -398,6 +460,7 @@ if __name__ == '__main__':
     print(f"Desktop viewer page: http://{LAN_IP}:5000/viewer")
     print(f"Pothole map viewer:  http://{LAN_IP}:5000/map")
     print(f"GPS logs saved to:   {POTHOLE_LOG_FILE}")
+    print(f"Screenshots saved to: {SCREENSHOTS_DIR}/")
     print("Press Ctrl+C to stop")
     print("=" * 50)
 

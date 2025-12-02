@@ -54,6 +54,7 @@
         }
         button:active { transform: scale(0.98); }
         small { display:block; margin-top:8px; color:#9f9; }
+        #screenshotCanvas { display: none; }
     </style>
 </head>
 <body>
@@ -76,12 +77,16 @@
             <video id="remoteVideo" autoplay playsinline></video>
         </div>
     </div>
+    
+    <canvas id="screenshotCanvas"></canvas>
 
     <script>
     const startBtn = document.getElementById("start-btn");
     const stopBtn = document.getElementById("stop-btn");
     const localVideo = document.getElementById("localVideo");
     const remoteVideo = document.getElementById("remoteVideo");
+    const screenshotCanvas = document.getElementById("screenshotCanvas");
+    const screenshotCtx = screenshotCanvas.getContext('2d');
 
     let pc = null;
     let localStream = null;
@@ -91,6 +96,18 @@
     let detectionPollInterval = null;
     const LOG_INTERVAL = 5000;
     const DETECTION_POLL_INTERVAL = 2000;
+
+    function captureScreenshot() {
+        if (!remoteVideo.videoWidth || !remoteVideo.videoHeight) {
+            return null;
+        }
+
+        screenshotCanvas.width = remoteVideo.videoWidth;
+        screenshotCanvas.height = remoteVideo.videoHeight;
+        screenshotCtx.drawImage(remoteVideo, 0, 0);
+        
+        return screenshotCanvas.toDataURL('image/jpeg', 0.8);
+    }
 
     async function getBackCameraStream() {
                 try {
@@ -167,7 +184,7 @@
         }
     }
 
-    async function logPotholeDetection(detectionCount, confidence) {
+    async function logPotholeDetection(detectionCount, confidence, boundingBoxes) {
         if (!currentLocation) {
             console.warn("No GPS location available");
             return;
@@ -183,6 +200,8 @@
         }
         lastLoggedTime = now;
 
+        const screenshot = captureScreenshot();
+
         try {
             const response = await fetch('/log_pothole', {
                 method: 'POST',
@@ -194,13 +213,15 @@
                     longitude: currentLocation.longitude,
                     accuracy: currentLocation.accuracy,
                     confidence: confidence,
-                    detection_count: detectionCount
+                    detection_count: detectionCount,
+                    bounding_boxes: boundingBoxes,
+                    screenshot: screenshot
                 })
             });
 
             const result = await response.json();
             if (result.status === 'logged') {
-                console.log('Pothole logged:', result.entry);
+                console.log('Pothole logged: with screenshot', result.entry);
             }
         } catch (err) {
             console.error('Error logging pothole:', err);
@@ -213,7 +234,7 @@
             const data = await response.json();
 
             if (data.count > 0) {
-                await logPotholeDetection(data.count, data.max_confidence);
+                await logPotholeDetection(data.count, data.max_confidence, data.boxes);
             }
         } catch (err) {
             console.error('Error polling detections:', err);
