@@ -222,26 +222,38 @@ class VideoTransformTrack(VideoStreamTrack):
 
     kind = "video"
 
-    def __init__ (self, track):
+    def __init__(self, track):
         super().__init__()
         self.track = track
+        self.counter = 0
 
     async def recv(self):
-        global latest_frame
+        global latest_frame, annotated_frame
 
-        frame = await self.track.recv()
-        img = frame.to_ndarray(format="bgr24")
+        try:
+            frame = await self.track.recv()
+            img = frame.to_ndarray(format="bgr24")
 
-        with frame_lock:
-            latest_frame = img
+            with frame_lock:
+                latest_frame = img.copy()
 
-        with frame_lock:
-            out = annotated_frame if annotated_frame is not None else img
+            with frame_lock:
+                out = annotated_frame.copy() if annotated_frame is not None else img.copy()
 
-        new_frame = VideoFrame.from_ndarray(out, format="bgr24")
-        new_frame.pts = frame.pts
-        new_frame.time_base = frame.time_base
-        return new_frame
+            new_frame = VideoFrame.from_ndarray(out, format="bgr24")
+            new_frame.pts = frame.pts
+            new_frame.time_base = frame.time_base
+
+            self.counter += 1
+            if self.counter % 30 == 0:
+                print(f"[VideoTransformTrack] Processed frame {self.counter}, size: {out.shape}")
+
+            return new_frame
+
+        except Exception as e:
+            print(f"[VideoTransformTrack] Error processing frame: {e}")
+            frame = await self.track.recv()
+            return frame
 
 @app.route('/')
 def home():
@@ -276,7 +288,7 @@ def ws_viewer_live(ws):
 
 @sock.route('/ws_viewer_detected')
 def ws_viewer_detected(ws):
-    print("Viewer Websocket connected (live feed)")
+    print("Viewer Websocket connected (detected feed)")
     with viewer_lock:
         viewer_clients_detected.add(ws)
     try:
@@ -289,9 +301,10 @@ def ws_viewer_detected(ws):
             viewer_clients_detected.discard(ws)
         print("Viewer Websocket disconnected (detected feed)")
 
-@app.route('/offer', methods= ['POST'])
+@app.route('/offer', methods=['POST'])
 def offer():
     params = request.get_json()
+    print(f"[WebRTC] Received offer from client")
 
     async def process_offer():
         offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
@@ -301,21 +314,30 @@ def offer():
 
         @pc.on("connectionstatechange")
         async def on_connectionstatechange():
-            print(f"Connection state is {pc.connectionState}")
+            print(f"[WebRTC] Connection state is {pc.connectionState}")
             if pc.connectionState == "failed":
                 await pc.close()
                 pcs.discard(pc)
 
         @pc.on("track")
         def on_track(track):
-            print(f"Track {track.kind} received")
+            print(f"[WebRTC] Track {track.kind} received")
             if track.kind == "video":
-                pc.addTrack(VideoTransformTrack(relay.subscribe(track)))
+                try:
+                    relay_track = relay.subscribe(track)
+                    transform_track = VideoTransformTrack(relay_track)
+                    pc.addTrack(transform_track)
+                    print(f"[WebRTC] Added transform track successfully")
+                except Exception as e:
+                    print(f"[WebRTC] Error adding track: {e}")
+                    # Fallback: add original track without transformation
+                    pc.addTrack(relay.subscribe(track))
 
         await pc.setRemoteDescription(offer)
-
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
+
+        print(f"[WebRTC] Answer created and set")
 
         return {
             "sdp": pc.localDescription.sdp,
