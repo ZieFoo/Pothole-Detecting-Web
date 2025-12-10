@@ -1,5 +1,11 @@
 To ensure that python3.py works, make sure the folder contains appv2.py, best.onnx, and the templates folder which consists of indexv2.html, viewerv2.html and pothole_mapv2.html.
 
+To ensure that all the python libraries are install. Create a virtual enivornment with the pyhton version being 3.10.19 and then run this code in the terminal
+
+```bash
+pip install -r requirements.txt
+```
+
 To run the program, open a terminal, navigate to the folder where appv3.py is located, and run:
 
 ```bash
