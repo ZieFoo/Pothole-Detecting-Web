@@ -6,7 +6,7 @@ To ensure that all required Python libraries are installed, create a virtual env
 pip install -r requirements.txt
 ```
 
-To run the program, open a terminal, navigate to the folder where appv3.py is located, and run:
+To run the program, open a terminal, navigate to the folder where appv2.py is located, and run:
 
 ```bash
 python appv2.py
